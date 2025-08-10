@@ -1,0 +1,30 @@
+{
+  "name": "ux-nevesht",
+  "private": true,
+  "description": "Farsi UX Writing AI Assistant with RAG for Snapp",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "clean": "turbo clean",
+    "type-check": "turbo type-check"
+  },
+  "devDependencies": {
+    "@turbo/gen": "^1.10.12",
+    "@types/react-dropzone": "^5.1.0",
+    "eslint": "^8.48.0",
+    "prettier": "^3.0.0",
+    "turbo": "^1.10.12",
+    "typescript": "^5.0.0"
+  },
+  "packageManager": "pnpm@8.10.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "dependencies": {
+    "@tailwindcss/typography": "^0.5.16",
+    "react-dropzone": "^14.2.3"
+  }
+}
