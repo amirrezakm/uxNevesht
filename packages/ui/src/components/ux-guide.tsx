@@ -110,21 +110,24 @@ export const UXGuide = React.forwardRef<HTMLDivElement, UXGuideProps>(
 
         {/* Tab Navigation */}
         <div className="flex flex-wrap gap-2 p-1 bg-gray-100 rounded-lg">
-          {guides.map((guide, index) => (
-            <button
-              key={index}
-              onClick={() => setSelectedGuide(index)}
-              className={cn(
-                'flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all',
-                selectedGuide === index
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
-              )}
-            >
-              <guide.icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{guide.title}</span>
-            </button>
-          ))}
+          {guides.map((guide, index) => {
+            const IconComponent = guide.icon;
+            return (
+              <button
+                key={index}
+                onClick={() => setSelectedGuide(index)}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all',
+                  selectedGuide === index
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                )}
+              >
+                <IconComponent className="w-4 h-4" />
+                <span className="hidden sm:inline">{guide.title}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Selected Guide Content */}
@@ -133,10 +136,15 @@ export const UXGuide = React.forwardRef<HTMLDivElement, UXGuideProps>(
           ColorMap[guides[selectedGuide]?.color as keyof typeof ColorMap]
         )}>
           <div className="flex items-start gap-3">
-            <guides[selectedGuide].icon className={cn(
-              'w-6 h-6 flex-shrink-0 mt-1',
-              IconColorMap[guides[selectedGuide]?.color as keyof typeof IconColorMap]
-            )} />
+            {(() => {
+              const IconComponent = guides[selectedGuide].icon;
+              return (
+                <IconComponent className={cn(
+                  'w-6 h-6 flex-shrink-0 mt-1',
+                  IconColorMap[guides[selectedGuide]?.color as keyof typeof IconColorMap]
+                )} />
+              );
+            })()}
             <div className="flex-1">
               <h3 className="font-semibold text-gray-900 mb-3">
                 {guides[selectedGuide].title}

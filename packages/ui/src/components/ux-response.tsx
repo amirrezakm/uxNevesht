@@ -6,7 +6,7 @@ export interface UXOption {
   text: string;
   tone: string;
   length: string;
-  context: string;
+  context?: string;
   emotion?: string;
 }
 
@@ -59,9 +59,9 @@ const ToneColor = (tone: string) => {
 
 export const UXResponse = React.forwardRef<HTMLDivElement, UXResponseProps>(
   ({ options, insights, alternatives, meta, className }, ref) => {
-    const [copiedIndex, setCopiedIndex] = React.useState<number | null>(null);
+    const [copiedIndex, setCopiedIndex] = React.useState<string | number | null>(null);
 
-    const handleCopy = async (text: string, index: number) => {
+    const handleCopy = async (text: string, index: string | number) => {
       const success = await copyToClipboard(text);
       if (success) {
         setCopiedIndex(index);
@@ -137,10 +137,12 @@ export const UXResponse = React.forwardRef<HTMLDivElement, UXResponseProps>(
               </div>
 
               {/* Context */}
-              <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
-                <span className="font-medium">کاربرد: </span>
-                {option.context}
-              </div>
+              {option.context && (
+                <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
+                  <span className="font-medium">کاربرد: </span>
+                  {option.context}
+                </div>
+              )}
             </div>
           ))}
         </div>

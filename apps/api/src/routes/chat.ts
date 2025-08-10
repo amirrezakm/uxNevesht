@@ -37,7 +37,11 @@ router.post('/', async (req, res, next) => {
     const { message, context, tone, model } = chatRequestSchema.parse(req.body);
 
     // Get relevant context from documents (with fallback for short messages)
-    let chunks, contextText, sources, qualityScore;
+    let chunks: any[] = [];
+    let contextText: string = '';
+    let sources: string[] = [];
+    let qualityScore: number = 0;
+    
     try {
       const result = await ragService.getRelevantContext(message);
       chunks = result.chunks;
@@ -45,7 +49,8 @@ router.post('/', async (req, res, next) => {
       sources = result.sources;
       qualityScore = result.qualityScore;
     } catch (error) {
-      console.warn('RAG search failed, proceeding without context:', error?.message);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('RAG search failed, proceeding without context:', errorMessage);
       chunks = [];
       contextText = '';
       sources = [];
@@ -135,7 +140,11 @@ router.post('/stream', async (req, res, next) => {
     });
 
     // Get relevant context (with fallback)
-    let chunks, contextText, sources, qualityScore;
+    let chunks: any[] = [];
+    let contextText: string = '';
+    let sources: string[] = [];
+    let qualityScore: number = 0;
+    
     try {
       const result = await ragService.getRelevantContext(message);
       chunks = result.chunks;
@@ -143,7 +152,8 @@ router.post('/stream', async (req, res, next) => {
       sources = result.sources;
       qualityScore = result.qualityScore;
     } catch (error) {
-      console.warn('RAG search failed in stream, proceeding without context:', error?.message);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('RAG search failed in stream, proceeding without context:', errorMessage);
       chunks = [];
       contextText = '';
       sources = [];
@@ -207,14 +217,18 @@ router.post('/generate-copy', async (req, res, next) => {
 
     // Get relevant context for this type of copy (with fallback)
     const contextQuery = `${request.elementType} ${request.context} ${request.audience}`;
-    let chunks, sources, qualityScore;
+    let chunks: any[] = [];
+    let sources: string[] = [];
+    let qualityScore: number = 0;
+    
     try {
       const result = await ragService.getRelevantContext(contextQuery);
       chunks = result.chunks;
       sources = result.sources;
       qualityScore = result.qualityScore;
     } catch (error) {
-      console.warn('RAG search failed in generate-copy, proceeding without context:', error?.message);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('RAG search failed in generate-copy, proceeding without context:', errorMessage);
       chunks = [];
       sources = [];
       qualityScore = 0;
