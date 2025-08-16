@@ -261,8 +261,42 @@ create_nginx_config() {
     rm -f /etc/nginx/sites-enabled/ux-nevesht
     rm -f /etc/nginx/sites-available/ux-nevesht
     
-    # Remove any existing rate limiting configuration to prevent duplicates
+    # Remove ALL existing rate limiting configurations to prevent duplicates
+    log "Cleaning up existing rate limiting configurations..."
+    
+    # Remove from conf.d directory
     rm -f /etc/nginx/conf.d/rate-limiting.conf
+    rm -f /etc/nginx/conf.d/*rate*.conf
+    
+    # Check and clean nginx.conf if it has rate limiting zones
+    if grep -q "limit_req_zone" /etc/nginx/nginx.conf; then
+        log "Removing rate limiting zones from main nginx.conf..."
+        # Restore from backup if available, otherwise remove the lines
+        if [ -f /etc/nginx/nginx.conf.backup ]; then
+            cp /etc/nginx/nginx.conf.backup /etc/nginx/nginx.conf
+        else
+            # Remove rate limiting lines from nginx.conf
+            sed -i '/limit_req_zone/d' /etc/nginx/nginx.conf
+            sed -i '/# Rate limiting zones/d' /etc/nginx/nginx.conf
+        fi
+    fi
+    
+    # Remove any gzip configurations that might have been added
+    if grep -q "# Gzip Settings" /etc/nginx/nginx.conf; then
+        log "Cleaning up gzip configurations from main nginx.conf..."
+        if [ -f /etc/nginx/nginx.conf.backup ]; then
+            cp /etc/nginx/nginx.conf.backup /etc/nginx/nginx.conf
+        fi
+    fi
+    
+    # Test nginx configuration before proceeding
+    log "Testing nginx configuration after cleanup..."
+    if ! nginx -t 2>/dev/null; then
+        log "Nginx configuration has issues, restoring from backup..."
+        if [ -f /etc/nginx/nginx.conf.backup ]; then
+            cp /etc/nginx/nginx.conf.backup /etc/nginx/nginx.conf
+        fi
+    fi
     
     # Create a custom nginx configuration file for rate limiting
     log "Creating rate limiting configuration..."
