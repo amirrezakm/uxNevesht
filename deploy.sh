@@ -37,10 +37,32 @@ error() {
     exit 1
 }
 
-# Check if running as root
+# Check if running as root and handle accordingly
 check_root() {
     if [[ $EUID -eq 0 ]]; then
-        error "This script should not be run as root. Please run as a regular user with sudo privileges."
+        warn "Running as root. Creating a regular user for deployment..."
+        
+        # Create a regular user if it doesn't exist
+        if ! id "deploy" &>/dev/null; then
+            useradd -m -s /bin/bash deploy
+            usermod -aG sudo deploy
+            log "Created user 'deploy' with sudo privileges"
+        fi
+        
+        # Set a temporary password for the deploy user
+        echo "deploy:$(openssl rand -base64 12)" | chpasswd
+        
+        log "Switching to 'deploy' user to continue deployment..."
+        log "You can also create your own user and run this script as that user instead."
+        
+        # Copy the script to the deploy user's home and run it
+        cp "$0" /home/deploy/
+        chown deploy:deploy /home/deploy/$(basename "$0")
+        chmod +x /home/deploy/$(basename "$0")
+        
+        # Switch to deploy user and run the script
+        sudo -u deploy bash /home/deploy/$(basename "$0")
+        exit $?
     fi
 }
 
