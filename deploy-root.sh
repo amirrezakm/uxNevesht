@@ -11,7 +11,7 @@ DOMAIN="uxw.payanekhosh.ir"
 APP_NAME="ux-nevesht"
 APP_USER="uxnevesht"
 APP_DIR="/var/www/$APP_NAME"
-REPO_URL="https://github.com/your-username/uxNevesht.git"  # Update with your actual repo URL
+REPO_URL="https://github.com/amirrezakm/uxNevesht.git"
 NODE_VERSION="18"
 API_PORT="3001"
 WEB_PORT="3000"
@@ -115,10 +115,25 @@ setup_app_directory() {
 
 # Clone and setup application
 setup_application() {
-    log "Cloning and setting up application..."
+    log "Setting up application..."
     
-    # Switch to app user for git operations
-    sudo -u $APP_USER bash << EOF
+    # Check if we're running from the source directory
+    CURRENT_DIR=$(pwd)
+    if [[ -f "$CURRENT_DIR/package.json" && -f "$CURRENT_DIR/turbo.json" ]]; then
+        log "Found application source in current directory. Copying to $APP_DIR..."
+        
+        # Copy current directory to app directory
+        cp -r "$CURRENT_DIR"/* "$APP_DIR/"
+        cp -r "$CURRENT_DIR"/.[^.]* "$APP_DIR/" 2>/dev/null || true
+        
+        # Set proper ownership
+        chown -R $APP_USER:www-data $APP_DIR
+        
+    else
+        log "Cloning from repository..."
+        
+        # Switch to app user for git operations
+        sudo -u $APP_USER bash << EOF
 cd $APP_DIR
 
 # Clone repository if it doesn't exist
@@ -128,6 +143,12 @@ else
     git fetch origin
     git reset --hard origin/main
 fi
+EOF
+    fi
+    
+    # Install dependencies and build as app user
+    sudo -u $APP_USER bash << EOF
+cd $APP_DIR
 
 # Install dependencies
 pnpm install
