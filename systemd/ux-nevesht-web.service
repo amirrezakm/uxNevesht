@@ -1,0 +1,50 @@
+[Unit]
+Description=UX Nevesht Web Application (Next.js)
+Documentation=https://github.com/your-username/uxNevesht
+After=network.target ux-nevesht-api.service
+Wants=network.target
+Requires=ux-nevesht-api.service
+
+[Service]
+Type=forking
+User=uxnevesht
+Group=www-data
+WorkingDirectory=/var/www/ux-nevesht
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=3000
+EnvironmentFile=/var/www/ux-nevesht/.env
+
+# PM2 commands
+ExecStart=/usr/bin/pm2 start ecosystem.config.js --only ux-nevesht-web --env production
+ExecReload=/usr/bin/pm2 reload ecosystem.config.js --only ux-nevesht-web --env production
+ExecStop=/usr/bin/pm2 stop ux-nevesht-web
+
+# Process management
+Restart=always
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/ux-nevesht
+ReadWritePaths=/var/log
+ReadWritePaths=/tmp
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ux-nevesht-web
+
+[Install]
+WantedBy=multi-user.target

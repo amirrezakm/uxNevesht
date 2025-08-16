@@ -1,0 +1,49 @@
+[Unit]
+Description=UX Nevesht API Server
+Documentation=https://github.com/your-username/uxNevesht
+After=network.target
+Wants=network.target
+
+[Service]
+Type=forking
+User=uxnevesht
+Group=www-data
+WorkingDirectory=/var/www/ux-nevesht
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=3001
+EnvironmentFile=/var/www/ux-nevesht/.env
+
+# PM2 commands
+ExecStart=/usr/bin/pm2 start ecosystem.config.js --only ux-nevesht-api --env production
+ExecReload=/usr/bin/pm2 reload ecosystem.config.js --only ux-nevesht-api --env production
+ExecStop=/usr/bin/pm2 stop ux-nevesht-api
+
+# Process management
+Restart=always
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/ux-nevesht
+ReadWritePaths=/var/log
+ReadWritePaths=/tmp
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ux-nevesht-api
+
+[Install]
+WantedBy=multi-user.target
