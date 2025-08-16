@@ -261,6 +261,9 @@ create_nginx_config() {
     rm -f /etc/nginx/sites-enabled/ux-nevesht
     rm -f /etc/nginx/sites-available/ux-nevesht
     
+    # Remove any existing rate limiting configuration to prevent duplicates
+    rm -f /etc/nginx/conf.d/rate-limiting.conf
+    
     # Create a custom nginx configuration file for rate limiting
     log "Creating rate limiting configuration..."
     tee /etc/nginx/conf.d/rate-limiting.conf > /dev/null << 'EOF'
