@@ -479,37 +479,13 @@ setup_firewall() {
 setup_pm2_for_user() {
     log "Setting up PM2 for application user..."
     
-    # Setup PM2 startup script for the app user
-    sudo -u $APP_USER pm2 startup systemd -u $APP_USER --hp /home/$APP_USER
+    # Setup PM2 startup script properly
+    log "Configuring PM2 startup..."
     
-    # The above command will output a command to run as root, but we'll handle it differently
-    # Create a systemd service for PM2
-    tee /etc/systemd/system/pm2-$APP_USER.service > /dev/null << EOF
-[Unit]
-Description=PM2 process manager for $APP_USER
-Documentation=https://pm2.keymetrics.io/
-After=network.target
-
-[Service]
-Type=forking
-User=$APP_USER
-LimitNOFILE=infinity
-LimitNPROC=infinity
-LimitCORE=infinity
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
-Environment=PM2_HOME=/home/$APP_USER/.pm2
-PIDFile=/home/$APP_USER/.pm2/pm2.pid
-Restart=on-failure
-
-ExecStart=/usr/bin/pm2 resurrect
-ExecReload=/usr/bin/pm2 reload all
-ExecStop=/usr/bin/pm2 kill
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl enable pm2-$APP_USER
+    # Run the PM2 startup command directly
+    env PATH=$PATH:/usr/bin pm2 startup systemd -u $APP_USER --hp /home/$APP_USER
+    
+    log "PM2 startup configured successfully"
 }
 
 # Start services
@@ -519,14 +495,42 @@ start_services() {
     # Switch to app user and start PM2
     sudo -u $APP_USER bash << EOF
 cd $APP_DIR
+
+# Start the applications with PM2
 pm2 start ecosystem.config.js --env production
+
+# Save the PM2 process list
 pm2 save
+
+# Show PM2 status
+pm2 list
 EOF
     
-    # Start the PM2 systemd service
-    systemctl start pm2-$APP_USER
-    
     log "Services started successfully"
+    
+    # Check if services are running
+    log "Checking service status..."
+    sudo -u $APP_USER pm2 list
+    
+    # Wait a moment for services to fully start
+    sleep 10
+    
+    # Health check
+    log "Performing health checks..."
+    
+    # Check if API is responding
+    if curl -f -s http://localhost:$API_PORT/health > /dev/null 2>&1; then
+        log "✅ API health check: PASSED (http://localhost:$API_PORT/health)"
+    else
+        warn "⚠️  API health check: FAILED - API may still be starting up"
+    fi
+    
+    # Check if Web is responding
+    if curl -f -s http://localhost:$WEB_PORT > /dev/null 2>&1; then
+        log "✅ Web health check: PASSED (http://localhost:$WEB_PORT)"
+    else
+        warn "⚠️  Web health check: FAILED - Web app may still be starting up"
+    fi
 }
 
 # Create update script
@@ -610,25 +614,40 @@ main() {
     create_update_script
     setup_ssl
     
-    log "Deployment completed successfully!"
     log ""
-    log "Next steps:"
+    log "🎉 Deployment completed successfully!"
+    log ""
+    log "📋 Next steps:"
     log "1. Update environment variables in $APP_DIR/.env"
-    log "2. Configure your database and external services"
+    log "   - Add your Supabase credentials"
+    log "   - Add your OpenAI API key"
+    log "   - Configure other service keys"
+    log "2. Restart services after updating .env: sudo -u $APP_USER pm2 restart all"
     log "3. Test your application at http://$DOMAIN"
-    log "4. Use '/usr/local/bin/update-$APP_NAME' to update the application"
     log ""
-    log "Useful commands:"
+    log "🌐 Application URLs:"
+    log "- Main site: http://$DOMAIN"
+    log "- API: http://$DOMAIN/api"
+    log "- Health check: http://$DOMAIN/health"
+    log ""
+    log "🔧 Management commands:"
+    log "- Update application: /usr/local/bin/update-$APP_NAME"
     log "- Check PM2 status: sudo -u $APP_USER pm2 status"
     log "- View logs: sudo -u $APP_USER pm2 logs"
     log "- Restart services: sudo -u $APP_USER pm2 restart all"
     log "- Check Nginx status: systemctl status nginx"
     log "- View Nginx logs: tail -f /var/log/nginx/$APP_NAME-*.log"
     log ""
-    log "Application URLs:"
-    log "- Main site: http://$DOMAIN"
-    log "- API: http://$DOMAIN/api"
-    log "- Health check: http://$DOMAIN/health"
+    log "🔒 Security:"
+    log "- Firewall is configured and active"
+    log "- Services run under dedicated user: $APP_USER"
+    log "- Consider setting up SSL: certbot --nginx -d $DOMAIN"
+    log ""
+    log "📝 Important files:"
+    log "- Application: $APP_DIR"
+    log "- Environment: $APP_DIR/.env"
+    log "- Nginx config: /etc/nginx/sites-available/$APP_NAME"
+    log "- PM2 config: $APP_DIR/ecosystem.config.js"
 }
 
 # Run main function
