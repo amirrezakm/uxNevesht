@@ -257,24 +257,18 @@ EOF
 create_nginx_config() {
     log "Creating Nginx configuration..."
     
-    # First, add rate limiting zones to main nginx.conf if not already present
-    if ! grep -q "limit_req_zone" /etc/nginx/nginx.conf; then
-        log "Adding rate limiting zones to main nginx.conf..."
-        
-        # Create a backup of nginx.conf
-        cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
-        
-        # Add rate limiting zones to the http block (after the opening brace)
-        sed -i '/http {/a\\n\t# Rate limiting zones\n\tlimit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;\n\tlimit_req_zone $binary_remote_addr zone=web:10m rate=30r/s;\n\tlimit_req_zone $binary_remote_addr zone=upload:10m rate=5r/s;\n' /etc/nginx/nginx.conf
-    fi
+    # Clean up any existing problematic configurations
+    rm -f /etc/nginx/sites-enabled/ux-nevesht
+    rm -f /etc/nginx/sites-available/ux-nevesht
     
-    # Add gzip configuration to main nginx.conf if not already present
-    if ! grep -q "gzip on" /etc/nginx/nginx.conf; then
-        log "Adding gzip configuration to main nginx.conf..."
-        
-        # Add gzip configuration to the http block
-        sed -i '/http {/a\\n\t# Gzip Settings\n\tgzip on;\n\tgzip_vary on;\n\tgzip_min_length 1024;\n\tgzip_proxied expired no-cache no-store private auth;\n\tgzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript application/json;\n' /etc/nginx/nginx.conf
-    fi
+    # Create a custom nginx configuration file for rate limiting
+    log "Creating rate limiting configuration..."
+    tee /etc/nginx/conf.d/rate-limiting.conf > /dev/null << 'EOF'
+# Rate limiting zones for UX Nevesht
+limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=web:10m rate=30r/s;
+limit_req_zone $binary_remote_addr zone=upload:10m rate=5r/s;
+EOF
     
     log "Creating server configuration..."
     tee /etc/nginx/sites-available/$APP_NAME > /dev/null << EOF
