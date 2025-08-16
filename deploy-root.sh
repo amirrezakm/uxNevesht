@@ -257,6 +257,26 @@ EOF
 create_nginx_config() {
     log "Creating Nginx configuration..."
     
+    # First, add rate limiting zones to main nginx.conf if not already present
+    if ! grep -q "limit_req_zone" /etc/nginx/nginx.conf; then
+        log "Adding rate limiting zones to main nginx.conf..."
+        
+        # Create a backup of nginx.conf
+        cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
+        
+        # Add rate limiting zones to the http block (after the opening brace)
+        sed -i '/http {/a\\n\t# Rate limiting zones\n\tlimit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;\n\tlimit_req_zone $binary_remote_addr zone=web:10m rate=30r/s;\n\tlimit_req_zone $binary_remote_addr zone=upload:10m rate=5r/s;\n' /etc/nginx/nginx.conf
+    fi
+    
+    # Add gzip configuration to main nginx.conf if not already present
+    if ! grep -q "gzip on" /etc/nginx/nginx.conf; then
+        log "Adding gzip configuration to main nginx.conf..."
+        
+        # Add gzip configuration to the http block
+        sed -i '/http {/a\\n\t# Gzip Settings\n\tgzip on;\n\tgzip_vary on;\n\tgzip_min_length 1024;\n\tgzip_proxied expired no-cache no-store private auth;\n\tgzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript application/json;\n' /etc/nginx/nginx.conf
+    fi
+    
+    log "Creating server configuration..."
     tee /etc/nginx/sites-available/$APP_NAME > /dev/null << EOF
 server {
     listen 80;
@@ -269,19 +289,13 @@ server {
     add_header Referrer-Policy "no-referrer-when-downgrade" always;
     add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval'" always;
     
-    # Gzip compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_proxied expired no-cache no-store private auth;
-    gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/javascript application/json;
-    
-    # Rate limiting
-    limit_req_zone \$binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req_zone \$binary_remote_addr zone=web:10m rate=30r/s;
-    
     # Client max body size for file uploads
     client_max_body_size 10M;
+    
+    # Proxy timeouts
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
     
     # API routes
     location /api/ {
@@ -359,6 +373,26 @@ server {
         log_not_found off;
     }
     
+    # Security: Deny access to sensitive files
+    location ~* \.(env|log|conf)\$ {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+    
+    # Robots.txt
+    location = /robots.txt {
+        proxy_pass http://localhost:$WEB_PORT/robots.txt;
+        access_log off;
+        log_not_found off;
+    }
+    
+    # Sitemap
+    location = /sitemap.xml {
+        proxy_pass http://localhost:$WEB_PORT/sitemap.xml;
+        access_log off;
+    }
+    
     # Logs
     access_log /var/log/nginx/$APP_NAME-access.log;
     error_log /var/log/nginx/$APP_NAME-error.log;
@@ -372,10 +406,14 @@ EOF
     rm -f /etc/nginx/sites-enabled/default
     
     # Test Nginx configuration
-    nginx -t
-    
-    # Reload Nginx
-    systemctl reload nginx
+    log "Testing Nginx configuration..."
+    if nginx -t; then
+        log "Nginx configuration is valid. Reloading..."
+        systemctl reload nginx
+        log "Nginx configured successfully"
+    else
+        error "Nginx configuration test failed. Please check the configuration manually."
+    fi
 }
 
 # Setup logging directories
