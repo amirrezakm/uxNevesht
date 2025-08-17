@@ -174,71 +174,112 @@ else
     echo "❌ TypeScript compiler not found"
 fi
 
-# Build the application - try multiple approaches
+# Build the application - handle workspace dependencies properly
 echo "Attempting to build the application..."
 
-# First, try using the local turbo with proper path
-if [ -f "node_modules/.bin/turbo" ]; then
-    echo "Using local turbo..."
-    if ./node_modules/.bin/turbo build; then
-        echo "✅ Build successful with local turbo"
-    else
-        echo "❌ Local turbo build failed, trying alternatives..."
-        build_failed=true
+# First, ensure all workspace packages are built in correct order
+echo "Building workspace packages in dependency order..."
+
+# Build shared packages first (these have no dependencies)
+echo "Building shared packages..."
+for pkg in packages/config packages/database packages/ai packages/ui; do
+    if [ -d "\$pkg" ]; then
+        echo "Building \$pkg..."
+        cd "\$pkg"
+        if pnpm run build 2>&1; then
+            echo "✅ \$pkg built successfully"
+        else
+            echo "❌ Failed to build \$pkg - this may cause app builds to fail"
+        fi
+        cd - > /dev/null
     fi
-else
-    build_failed=true
+done
+
+# Now try building the main applications
+echo "Building main applications..."
+
+# Method 1: Try turbo (handles dependencies automatically)
+build_success=false
+
+if [ -f "node_modules/.bin/turbo" ]; then
+    echo "Attempting build with local turbo..."
+    if ./node_modules/.bin/turbo build 2>&1 | tee build.log; then
+        echo "✅ Build successful with local turbo"
+        build_success=true
+    else
+        echo "❌ Local turbo build failed. Error output:"
+        tail -20 build.log
+    fi
 fi
 
-# If local turbo failed or doesn't exist, try other methods
-if [ "\$build_failed" = "true" ]; then
-    echo "Trying alternative build methods..."
-    
-    # Try npx turbo
-    if npx turbo@1.10.12 build; then
+# Method 2: Try npx turbo if local failed
+if [ "\$build_success" = "false" ]; then
+    echo "Trying npx turbo..."
+    if npx turbo@1.10.12 build 2>&1 | tee build.log; then
         echo "✅ Build successful with npx turbo"
-    # Try pnpm run build
-    elif pnpm run build; then
-        echo "✅ Build successful with pnpm run build"
+        build_success=true
     else
-        echo "All turbo attempts failed, building each workspace manually..."
-        
-        # Build API
-        echo "Building API..."
-        cd apps/api
-        if [ -f "package.json" ]; then
-            # Install dependencies for this workspace if needed
-            pnpm install
-            # Try different build approaches
-            if pnpm run build; then
-                echo "✅ API built successfully with pnpm run build"
-            elif npx tsc; then
-                echo "✅ API built successfully with npx tsc"
-            elif ../../node_modules/.bin/tsc; then
-                echo "✅ API built successfully with local tsc"
-            else
-                echo "❌ Failed to build API"
-            fi
-        fi
-        cd ../..
-        
-        # Build Web
-        echo "Building Web..."
-        cd apps/web
-        if [ -f "package.json" ]; then
-            # Install dependencies for this workspace if needed
-            pnpm install
-            if pnpm run build; then
-                echo "✅ Web built successfully"
-            elif npx next build; then
-                echo "✅ Web built successfully with npx next build"
-            else
-                echo "❌ Failed to build Web"
-            fi
-        fi
-        cd ../..
+        echo "❌ npx turbo build failed. Error output:"
+        tail -20 build.log
     fi
 fi
+
+# Method 3: Try pnpm run build if turbo failed
+if [ "\$build_success" = "false" ]; then
+    echo "Trying pnpm run build..."
+    if pnpm run build 2>&1 | tee build.log; then
+        echo "✅ Build successful with pnpm run build"
+        build_success=true
+    else
+        echo "❌ pnpm run build failed. Error output:"
+        tail -20 build.log
+    fi
+fi
+
+# Method 4: Manual workspace builds if all else failed
+if [ "\$build_success" = "false" ]; then
+    echo "All automated builds failed. Attempting manual workspace builds..."
+    
+    # Build API manually
+    echo "Building API manually..."
+    cd apps/api
+    if [ -f "package.json" ]; then
+        echo "Installing API dependencies..."
+        pnpm install
+        echo "Running API TypeScript build..."
+        if pnpm run build 2>&1 | tee ../../api-build.log; then
+            echo "✅ API built successfully"
+        else
+            echo "❌ API build failed. Error output:"
+            tail -10 ../../api-build.log
+        fi
+    fi
+    cd ../..
+    
+    # Build Web manually
+    echo "Building Web manually..."
+    cd apps/web
+    if [ -f "package.json" ]; then
+        echo "Installing Web dependencies..."
+        pnpm install
+        echo "Running Web Next.js build..."
+        if pnpm run build 2>&1 | tee ../../web-build.log; then
+            echo "✅ Web built successfully"
+        else
+            echo "❌ Web build failed. Error output:"
+            tail -10 ../../web-build.log
+            echo ""
+            echo "Common Next.js build issues:"
+            echo "1. Missing workspace dependencies (@ux-nevesht/ui)"
+            echo "2. TypeScript errors in components"
+            echo "3. Import/export issues between packages"
+        fi
+    fi
+    cd ../..
+fi
+
+# Clean up log files
+rm -f build.log api-build.log web-build.log
 
 echo "Build process completed."
 
