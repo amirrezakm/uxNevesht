@@ -154,30 +154,93 @@ cd $APP_DIR
 export PATH="/usr/bin:\$PATH:\$PWD/node_modules/.bin"
 
 # Install dependencies
+echo "Installing dependencies..."
 pnpm install
 
-# Verify turbo is available after install
+# Verify installations
+echo "Verifying installations..."
 if [ -f "node_modules/.bin/turbo" ]; then
-    echo "Turbo found in node_modules/.bin"
+    echo "✅ Turbo found in node_modules/.bin"
+    ls -la node_modules/.bin/turbo
 else
-    echo "Turbo not found, trying to install globally for this session"
-    npm install -g turbo
+    echo "❌ Turbo not found in node_modules/.bin"
+    echo "Contents of node_modules/.bin:"
+    ls -la node_modules/.bin/ | head -10
+fi
+
+if [ -f "node_modules/.bin/tsc" ]; then
+    echo "✅ TypeScript compiler found"
+else
+    echo "❌ TypeScript compiler not found"
 fi
 
 # Build the application - try multiple approaches
 echo "Attempting to build the application..."
-if pnpm run build; then
-    echo "Build successful with pnpm run build"
-elif npx turbo build; then
-    echo "Build successful with npx turbo build"
-elif ./node_modules/.bin/turbo build; then
-    echo "Build successful with direct turbo path"
+
+# First, try using the local turbo with proper path
+if [ -f "node_modules/.bin/turbo" ]; then
+    echo "Using local turbo..."
+    if ./node_modules/.bin/turbo build; then
+        echo "✅ Build successful with local turbo"
+    else
+        echo "❌ Local turbo build failed, trying alternatives..."
+        build_failed=true
+    fi
 else
-    echo "All build attempts failed, trying manual build of each app..."
-    # Fallback: build each app individually
-    cd apps/api && pnpm build && cd ../..
-    cd apps/web && pnpm build && cd ../..
+    build_failed=true
 fi
+
+# If local turbo failed or doesn't exist, try other methods
+if [ "\$build_failed" = "true" ]; then
+    echo "Trying alternative build methods..."
+    
+    # Try npx turbo
+    if npx turbo@1.10.12 build; then
+        echo "✅ Build successful with npx turbo"
+    # Try pnpm run build
+    elif pnpm run build; then
+        echo "✅ Build successful with pnpm run build"
+    else
+        echo "All turbo attempts failed, building each workspace manually..."
+        
+        # Build API
+        echo "Building API..."
+        cd apps/api
+        if [ -f "package.json" ]; then
+            # Install dependencies for this workspace if needed
+            pnpm install
+            # Try different build approaches
+            if pnpm run build; then
+                echo "✅ API built successfully with pnpm run build"
+            elif npx tsc; then
+                echo "✅ API built successfully with npx tsc"
+            elif ../../node_modules/.bin/tsc; then
+                echo "✅ API built successfully with local tsc"
+            else
+                echo "❌ Failed to build API"
+            fi
+        fi
+        cd ../..
+        
+        # Build Web
+        echo "Building Web..."
+        cd apps/web
+        if [ -f "package.json" ]; then
+            # Install dependencies for this workspace if needed
+            pnpm install
+            if pnpm run build; then
+                echo "✅ Web built successfully"
+            elif npx next build; then
+                echo "✅ Web built successfully with npx next build"
+            else
+                echo "❌ Failed to build Web"
+            fi
+        fi
+        cd ../..
+    fi
+fi
+
+echo "Build process completed."
 
 EOF
 }
@@ -583,29 +646,36 @@ git fetch origin
 git reset --hard origin/main
 
 # Install dependencies
+echo "Installing dependencies..."
 pnpm install
 
-# Verify turbo is available after install
+# Build the application
+echo "Building application..."
 if [ -f "node_modules/.bin/turbo" ]; then
-    echo "Turbo found in node_modules/.bin"
+    echo "Using local turbo..."
+    if ./node_modules/.bin/turbo build; then
+        echo "✅ Build successful with local turbo"
+    else
+        echo "Local turbo failed, trying alternatives..."
+        if npx turbo@1.10.12 build; then
+            echo "✅ Build successful with npx turbo"
+        elif pnpm run build; then
+            echo "✅ Build successful with pnpm run build"
+        else
+            echo "Building workspaces individually..."
+            cd apps/api && pnpm install && pnpm run build && cd ../..
+            cd apps/web && pnpm install && pnpm run build && cd ../..
+        fi
+    fi
 else
-    echo "Turbo not found, trying to install globally for this session"
-    npm install -g turbo
-fi
-
-# Build the application - try multiple approaches
-echo "Attempting to build the application..."
-if pnpm run build; then
-    echo "Build successful with pnpm run build"
-elif npx turbo build; then
-    echo "Build successful with npx turbo build"
-elif ./node_modules/.bin/turbo build; then
-    echo "Build successful with direct turbo path"
-else
-    echo "All build attempts failed, trying manual build of each app..."
-    # Fallback: build each app individually
-    cd apps/api && pnpm build && cd ../..
-    cd apps/web && pnpm build && cd ../..
+    echo "No local turbo found, using alternatives..."
+    if pnpm run build; then
+        echo "✅ Build successful with pnpm run build"
+    else
+        echo "Building workspaces individually..."
+        cd apps/api && pnpm install && pnpm run build && cd ../..
+        cd apps/web && pnpm install && pnpm run build && cd ../..
+    fi
 fi
 
 # Restart services
