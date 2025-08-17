@@ -423,7 +423,7 @@ EOF
     tee /etc/nginx/sites-available/$APP_NAME > /dev/null << EOF
 server {
     listen 80;
-    server_name $DOMAIN www.$DOMAIN;
+    server_name $DOMAIN;
     
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -820,7 +820,7 @@ setup_ssl() {
         apt install -y certbot python3-certbot-nginx
         
         log "Obtaining SSL certificate..."
-        certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN
+        certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN
         
         # Auto-renewal
         systemctl enable certbot.timer
