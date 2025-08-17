@@ -209,7 +209,7 @@ if ! $build_success; then
 fi
 
 # Method 2: Try pnpm build
-if ! \$build_success; then
+if ! $build_success; then
     log "Attempting build with pnpm..."
     if pnpm build 2>&1 | tee build.log; then
         log "✅ Build successful with pnpm"
@@ -218,20 +218,20 @@ if ! \$build_success; then
 fi
 
 # Method 3: Build packages individually
-if ! \$build_success; then
+if ! $build_success; then
     log "Building packages individually..."
     
     # Build shared packages first
 for pkg in packages/config packages/database packages/ai packages/ui; do
-    if [ -d "\$pkg" ] && [ -f "\$pkg/package.json" ]; then
-        log "Building \$pkg..."
-        cd "\$pkg"
+    if [ -d "$pkg" ] && [ -f "$pkg/package.json" ]; then
+        log "Building $pkg..."
+        cd "$pkg"
         pnpm install
         if grep -q '"build"' package.json; then
             if pnpm run build; then
-                log "✅ \$pkg built successfully"
+                log "✅ $pkg built successfully"
             else
-                warn "❌ Failed to build \$pkg"
+                warn "❌ Failed to build $pkg"
             fi
         fi
         cd $APP_DIR
@@ -280,14 +280,13 @@ fi
 
 # Verify build outputs
 log "Verifying build outputs..."
-API_BUILT=false
-WEB_BUILT=false
 
 if [ -f "apps/api/dist/index.js" ]; then
     log "✅ API build output found: apps/api/dist/index.js"
-    API_BUILT=true
+    echo "API_BUILT=true" > /tmp/build_status
 else
     warn "❌ API build output missing"
+    echo "API_BUILT=false" > /tmp/build_status
     # List what we have
     if [ -d "apps/api/dist" ]; then
         log "Contents of apps/api/dist/:"
@@ -297,19 +296,30 @@ fi
 
 if [ -d "apps/web/.next" ]; then
     log "✅ Web build output found: apps/web/.next/"
-    WEB_BUILT=true
+    echo "WEB_BUILT=true" >> /tmp/build_status
 else
     warn "❌ Web build output missing"
+    echo "WEB_BUILT=false" >> /tmp/build_status
 fi
 
 # Clean up
 rm -f build.log
 
 log "Build process completed."
-log "API Built: $API_BUILT"
-log "Web Built: $WEB_BUILT"
 
 EOF
+
+    # Read build status from temp file
+    if [ -f /tmp/build_status ]; then
+        source /tmp/build_status
+        rm -f /tmp/build_status
+        log "API Built: $API_BUILT"
+        log "Web Built: $WEB_BUILT"
+    else
+        warn "Could not determine build status"
+        API_BUILT=false
+        WEB_BUILT=false
+    fi
 }
 
 # Create environment file
@@ -615,47 +625,36 @@ setup_pm2_for_user() {
 start_services() {
     log "Starting application services..."
     
-    sudo -u $APP_USER bash << 'EOF'
+    # Use the build status from setup_application
+    log "Build status - API: $API_BUILT, Web: $WEB_BUILT"
+    
+    if [ "$API_BUILT" = "true" ] && [ "$WEB_BUILT" = "true" ]; then
+        log "Starting both API and Web services..."
+        sudo -u $APP_USER bash << EOF
 cd $APP_DIR
-
-# Check what we can start
-API_BUILT=false
-WEB_BUILT=false
-
-if [ -f "apps/api/dist/index.js" ]; then
-    echo "✅ API build found"
-    API_BUILT=true
-else
-    echo "❌ API build missing"
-fi
-
-if [ -d "apps/web/.next" ]; then
-    echo "✅ Web build found"
-    WEB_BUILT=true
-else
-    echo "❌ Web build missing"
-fi
-
-# Create appropriate PM2 config based on what's available
-if [ "$API_BUILT" = "true" ] && [ "$WEB_BUILT" = "true" ]; then
-    echo "Starting both API and Web services..."
-    pm2 start ecosystem.config.js
-elif [ "$API_BUILT" = "true" ]; then
-    echo "Starting API service only..."
-    pm2 start ecosystem.config.js --only ux-nevesht-api
-elif [ "$WEB_BUILT" = "true" ]; then
-    echo "Starting Web service only..."
-    pm2 start ecosystem.config.js --only ux-nevesht-web
-else
-    echo "❌ No services can be started - no successful builds found"
-    echo "Run: sudo -u uxnevesht ./debug-build.sh"
-    exit 1
-fi
-
+pm2 start ecosystem.config.js
 pm2 save
 pm2 list
-
 EOF
+    elif [ "$API_BUILT" = "true" ]; then
+        log "Starting API service only..."
+        sudo -u $APP_USER bash << EOF
+cd $APP_DIR
+pm2 start ecosystem.config.js --only ux-nevesht-api
+pm2 save
+pm2 list
+EOF
+    elif [ "$WEB_BUILT" = "true" ]; then
+        log "Starting Web service only..."
+        sudo -u $APP_USER bash << EOF
+cd $APP_DIR
+pm2 start ecosystem.config.js --only ux-nevesht-web
+pm2 save
+pm2 list
+EOF
+    else
+        error "❌ No services can be started - no successful builds found. Run: sudo -u uxnevesht ./debug-build.sh"
+    fi
     
     log "Services started successfully"
     
@@ -663,16 +662,20 @@ EOF
     sleep 10
     log "Performing health checks..."
     
-    if curl -f -s http://localhost:$API_PORT/health > /dev/null 2>&1; then
-        log "✅ API health check: PASSED"
-    else
-        warn "⚠️  API health check: FAILED"
+    if [ "$API_BUILT" = "true" ]; then
+        if curl -f -s http://localhost:$API_PORT/health > /dev/null 2>&1; then
+            log "✅ API health check: PASSED"
+        else
+            warn "⚠️  API health check: FAILED"
+        fi
     fi
     
-    if curl -f -s http://localhost:$WEB_PORT > /dev/null 2>&1; then
-        log "✅ Web health check: PASSED"
-    else
-        warn "⚠️  Web health check: FAILED"
+    if [ "$WEB_BUILT" = "true" ]; then
+        if curl -f -s http://localhost:$WEB_PORT > /dev/null 2>&1; then
+            log "✅ Web health check: PASSED"
+        else
+            warn "⚠️  Web health check: FAILED"
+        fi
     fi
 }
 
