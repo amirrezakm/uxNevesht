@@ -186,10 +186,23 @@ for pkg in packages/config packages/database packages/ai packages/ui; do
     if [ -d "\$pkg" ]; then
         echo "Building \$pkg..."
         cd "\$pkg"
-        if pnpm run build 2>&1; then
-            echo "✅ \$pkg built successfully"
+        
+        # Install dependencies for this workspace package
+        echo "Installing dependencies for \$pkg..."
+        pnpm install
+        
+        # Check if build script exists
+        if pnpm run build --dry-run 2>/dev/null; then
+            echo "Running build for \$pkg..."
+            # Set PATH to include root node_modules for TypeScript
+            export PATH="\$PWD/../../node_modules/.bin:\$PATH"
+            if pnpm run build 2>&1; then
+                echo "✅ \$pkg built successfully"
+            else
+                echo "❌ Failed to build \$pkg - this may cause app builds to fail"
+            fi
         else
-            echo "❌ Failed to build \$pkg - this may cause app builds to fail"
+            echo "⚠️  No build script found in \$pkg - skipping"
         fi
         cd - > /dev/null
     fi
@@ -669,14 +682,16 @@ else
     echo "❌ Web build missing - will not start Web service"
 fi
 
-# Create a temporary ecosystem config with only working services
-cat > ecosystem.temp.js << 'TEMP_EOF'
+# Start services based on what was built successfully
+if [ "\$API_BUILT" = "true" ] && [ "\$WEB_BUILT" = "true" ]; then
+    echo "Starting both API and Web services..."
+    pm2 start ecosystem.config.js --env production
+elif [ "\$API_BUILT" = "true" ]; then
+    echo "Starting API service only (Web build failed)..."
+    # Create API-only config
+    cat > ecosystem.api-only.js << 'API_EOF'
 module.exports = {
   apps: [
-TEMP_EOF
-
-if [ "\$API_BUILT" = "true" ]; then
-    cat >> ecosystem.temp.js << 'TEMP_EOF'
     {
       name: 'ux-nevesht-api',
       script: './apps/api/dist/index.js',
@@ -697,12 +712,18 @@ if [ "\$API_BUILT" = "true" ]; then
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s'
-    },
-TEMP_EOF
-fi
-
-if [ "\$WEB_BUILT" = "true" ]; then
-    cat >> ecosystem.temp.js << 'TEMP_EOF'
+    }
+  ]
+};
+API_EOF
+    pm2 start ecosystem.api-only.js --env production
+    rm -f ecosystem.api-only.js
+elif [ "\$WEB_BUILT" = "true" ]; then
+    echo "Starting Web service only (API build failed)..."
+    # Create Web-only config
+    cat > ecosystem.web-only.js << 'WEB_EOF'
+module.exports = {
+  apps: [
     {
       name: 'ux-nevesht-web',
       script: 'npm',
@@ -723,34 +744,26 @@ if [ "\$WEB_BUILT" = "true" ]; then
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s'
-    },
-TEMP_EOF
-fi
-
-# Close the config file (remove trailing comma if present)
-sed -i 's/,\$//' ecosystem.temp.js
-cat >> ecosystem.temp.js << 'TEMP_EOF'
+    }
   ]
 };
-TEMP_EOF
-
-# Start the applications with PM2 using the temporary config
-if [ "\$API_BUILT" = "true" ] || [ "\$WEB_BUILT" = "true" ]; then
-    echo "Starting available services..."
-    pm2 start ecosystem.temp.js --env production
-    
-    # Save the PM2 process list
-    pm2 save
-    
-    # Show PM2 status
-    pm2 list
+WEB_EOF
+    pm2 start ecosystem.web-only.js --env production
+    rm -f ecosystem.web-only.js
 else
     echo "❌ No services can be started - no successful builds found"
     echo "Please check the build process and try again"
+    echo ""
+    echo "To debug build issues, run:"
+    echo "cd /var/www/ux-nevesht"
+    echo "sudo -u uxnevesht ./debug-build.sh"
 fi
 
-# Clean up temporary file
-rm -f ecosystem.temp.js
+# Save the PM2 process list and show status
+if [ "\$API_BUILT" = "true" ] || [ "\$WEB_BUILT" = "true" ]; then
+    pm2 save
+    pm2 list
+fi
 
 EOF
     
