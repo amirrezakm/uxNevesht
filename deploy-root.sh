@@ -150,11 +150,14 @@ EOF
     sudo -u $APP_USER bash << EOF
 cd $APP_DIR
 
+# Set up proper PATH for npm/pnpm global packages
+export PATH="/usr/bin:\$PATH"
+
 # Install dependencies
 pnpm install
 
-# Build the application
-pnpm build
+# Build the application using pnpm (which will use local turbo)
+pnpm run build
 
 EOF
 }
@@ -552,6 +555,9 @@ echo "Updating $APP_NAME..."
 sudo -u \$APP_USER bash << 'SCRIPT_EOF'
 cd \$APP_DIR
 
+# Set up proper PATH for npm/pnpm global packages
+export PATH="/usr/bin:\$PATH"
+
 # Pull latest changes
 git fetch origin
 git reset --hard origin/main
@@ -559,8 +565,8 @@ git reset --hard origin/main
 # Install dependencies
 pnpm install
 
-# Build application
-pnpm build
+# Build application using pnpm (which will use local turbo)
+pnpm run build
 
 # Restart services
 pm2 restart all
