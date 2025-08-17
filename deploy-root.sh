@@ -142,11 +142,20 @@ EOF
     fi
     
     # Build application with robust error handling
-    sudo -u $APP_USER bash << 'EOF'
+    sudo -u $APP_USER bash << EOF
 cd $APP_DIR
 
+# Verify we're in the right directory
+echo "Current directory: \$(pwd)"
+echo "Expected directory: $APP_DIR"
+
+if [ "\$(pwd)" != "$APP_DIR" ]; then
+    echo "ERROR: Not in correct directory!"
+    exit 1
+fi
+
 # Set up proper PATH including global and local tools
-export PATH="/usr/local/bin:/usr/bin:$PATH:$PWD/node_modules/.bin"
+export PATH="/usr/local/bin:/usr/bin:\$PATH:\$PWD/node_modules/.bin"
 
 log() {
     echo -e "\033[0;32m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m"
@@ -200,7 +209,7 @@ if ! $build_success; then
 fi
 
 # Method 2: Try pnpm build
-if ! $build_success; then
+if ! \$build_success; then
     log "Attempting build with pnpm..."
     if pnpm build 2>&1 | tee build.log; then
         log "✅ Build successful with pnpm"
@@ -209,25 +218,25 @@ if ! $build_success; then
 fi
 
 # Method 3: Build packages individually
-if ! $build_success; then
+if ! \$build_success; then
     log "Building packages individually..."
     
     # Build shared packages first
-    for pkg in packages/config packages/database packages/ai packages/ui; do
-        if [ -d "$pkg" ] && [ -f "$pkg/package.json" ]; then
-            log "Building $pkg..."
-            cd "$pkg"
-            pnpm install
-            if grep -q '"build"' package.json; then
-                if pnpm run build; then
-                    log "✅ $pkg built successfully"
-                else
-                    warn "❌ Failed to build $pkg"
-                fi
+for pkg in packages/config packages/database packages/ai packages/ui; do
+    if [ -d "\$pkg" ] && [ -f "\$pkg/package.json" ]; then
+        log "Building \$pkg..."
+        cd "\$pkg"
+        pnpm install
+        if grep -q '"build"' package.json; then
+            if pnpm run build; then
+                log "✅ \$pkg built successfully"
+            else
+                warn "❌ Failed to build \$pkg"
             fi
-            cd "$APP_DIR"
         fi
-    done
+        cd $APP_DIR
+    fi
+done
     
     # Build API
     log "Building API..."
@@ -247,7 +256,7 @@ if ! $build_success; then
         else
             warn "❌ API build failed"
         fi
-        cd "$APP_DIR"
+        cd $APP_DIR
     fi
     
     # Build Web
@@ -265,7 +274,7 @@ if ! $build_success; then
         else
             warn "❌ Web build failed"
         fi
-        cd "$APP_DIR"
+        cd $APP_DIR
     fi
 fi
 
