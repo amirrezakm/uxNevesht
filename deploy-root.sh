@@ -150,14 +150,34 @@ EOF
     sudo -u $APP_USER bash << EOF
 cd $APP_DIR
 
-# Set up proper PATH for npm/pnpm global packages
-export PATH="/usr/bin:\$PATH"
+# Set up proper PATH for npm/pnpm global packages and local node_modules
+export PATH="/usr/bin:\$PATH:\$PWD/node_modules/.bin"
 
 # Install dependencies
 pnpm install
 
-# Build the application using pnpm (which will use local turbo)
-pnpm run build
+# Verify turbo is available after install
+if [ -f "node_modules/.bin/turbo" ]; then
+    echo "Turbo found in node_modules/.bin"
+else
+    echo "Turbo not found, trying to install globally for this session"
+    npm install -g turbo
+fi
+
+# Build the application - try multiple approaches
+echo "Attempting to build the application..."
+if pnpm run build; then
+    echo "Build successful with pnpm run build"
+elif npx turbo build; then
+    echo "Build successful with npx turbo build"
+elif ./node_modules/.bin/turbo build; then
+    echo "Build successful with direct turbo path"
+else
+    echo "All build attempts failed, trying manual build of each app..."
+    # Fallback: build each app individually
+    cd apps/api && pnpm build && cd ../..
+    cd apps/web && pnpm build && cd ../..
+fi
 
 EOF
 }
@@ -555,8 +575,8 @@ echo "Updating $APP_NAME..."
 sudo -u \$APP_USER bash << 'SCRIPT_EOF'
 cd \$APP_DIR
 
-# Set up proper PATH for npm/pnpm global packages
-export PATH="/usr/bin:\$PATH"
+# Set up proper PATH for npm/pnpm global packages and local node_modules
+export PATH="/usr/bin:\$PATH:\$PWD/node_modules/.bin"
 
 # Pull latest changes
 git fetch origin
@@ -565,8 +585,28 @@ git reset --hard origin/main
 # Install dependencies
 pnpm install
 
-# Build application using pnpm (which will use local turbo)
-pnpm run build
+# Verify turbo is available after install
+if [ -f "node_modules/.bin/turbo" ]; then
+    echo "Turbo found in node_modules/.bin"
+else
+    echo "Turbo not found, trying to install globally for this session"
+    npm install -g turbo
+fi
+
+# Build the application - try multiple approaches
+echo "Attempting to build the application..."
+if pnpm run build; then
+    echo "Build successful with pnpm run build"
+elif npx turbo build; then
+    echo "Build successful with npx turbo build"
+elif ./node_modules/.bin/turbo build; then
+    echo "Build successful with direct turbo path"
+else
+    echo "All build attempts failed, trying manual build of each app..."
+    # Fallback: build each app individually
+    cd apps/api && pnpm build && cd ../..
+    cd apps/web && pnpm build && cd ../..
+fi
 
 # Restart services
 pm2 restart all
