@@ -86,3 +86,4 @@ echo "- Check status: sudo -u uxnevesht pm2 list"
 echo "- View logs: sudo -u uxnevesht pm2 logs ux-nevesht-web"
 echo "- Restart: sudo -u uxnevesht pm2 restart ux-nevesht-web"
 
+
