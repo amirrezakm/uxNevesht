@@ -52,7 +52,7 @@ update_system() {
     apt install -y curl wget git build-essential software-properties-common
 }
 
-# Install Node.js and pnpm
+# Install Node.js and package managers
 install_nodejs() {
     log "Installing Node.js $NODE_VERSION..."
     
@@ -60,14 +60,17 @@ install_nodejs() {
     curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
     apt-get install -y nodejs
     
-    # Install pnpm globally
-    log "Installing pnpm..."
-    npm install -g pnpm
+    # Install pnpm and other tools globally
+    log "Installing package managers and tools..."
+    npm install -g pnpm typescript turbo pm2
     
     # Verify installations
-    node --version
-    npm --version
-    pnpm --version
+    log "Verifying installations..."
+    echo "Node.js: $(node --version)"
+    echo "npm: $(npm --version)"
+    echo "pnpm: $(pnpm --version)"
+    echo "TypeScript: $(tsc --version)"
+    echo "PM2: $(pm2 --version)"
 }
 
 # Install and configure Nginx
@@ -81,14 +84,6 @@ install_nginx() {
     
     # Allow Nginx through firewall
     ufw allow 'Nginx Full'
-}
-
-# Install and configure PM2
-install_pm2() {
-    log "Installing PM2..."
-    npm install -g pm2
-    
-    log "PM2 installed successfully"
 }
 
 # Create application user
@@ -113,7 +108,7 @@ setup_app_directory() {
     chmod -R 755 $APP_DIR
 }
 
-# Clone and setup application
+# Clone and setup application with robust build process
 setup_application() {
     log "Setting up application..."
     
@@ -146,173 +141,164 @@ fi
 EOF
     fi
     
-    # Install dependencies and build as app user
-    sudo -u $APP_USER bash << EOF
+    # Build application with robust error handling
+    sudo -u $APP_USER bash << 'EOF'
 cd $APP_DIR
 
-# Set up proper PATH for npm/pnpm global packages and local node_modules
-export PATH="/usr/bin:\$PATH:\$PWD/node_modules/.bin"
+# Set up proper PATH including global and local tools
+export PATH="/usr/local/bin:/usr/bin:$PATH:$PWD/node_modules/.bin"
 
-# Install dependencies
-echo "Installing dependencies..."
+log() {
+    echo -e "\033[0;32m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m"
+}
+
+warn() {
+    echo -e "\033[1;33m[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1\033[0m"
+}
+
+log "Starting build process..."
+
+# Clean install dependencies
+log "Installing dependencies..."
+rm -rf node_modules package-lock.json yarn.lock
 pnpm install
 
-# Verify installations
-echo "Verifying installations..."
-if [ -f "node_modules/.bin/turbo" ]; then
-    echo "✅ Turbo found in node_modules/.bin"
-    ls -la node_modules/.bin/turbo
+# Verify tools are available
+log "Verifying build tools..."
+if command -v tsc >/dev/null 2>&1; then
+    log "✅ TypeScript compiler available: $(tsc --version)"
 else
-    echo "❌ Turbo not found in node_modules/.bin"
-    echo "Contents of node_modules/.bin:"
-    ls -la node_modules/.bin/ | head -10
+    warn "❌ TypeScript not found, installing locally..."
+    pnpm add -D typescript
 fi
 
-if [ -f "node_modules/.bin/tsc" ]; then
-    echo "✅ TypeScript compiler found"
+if command -v turbo >/dev/null 2>&1; then
+    log "✅ Turbo available: $(turbo --version)"
+elif [ -f "node_modules/.bin/turbo" ]; then
+    log "✅ Local Turbo available"
 else
-    echo "❌ TypeScript compiler not found"
+    warn "❌ Turbo not found"
 fi
 
-# Build the application - handle workspace dependencies properly
-echo "Attempting to build the application..."
-
-# First, ensure all workspace packages are built in correct order
-echo "Building workspace packages in dependency order..."
-
-# Build shared packages first (these have no dependencies)
-echo "Building shared packages..."
-for pkg in packages/config packages/database packages/ai packages/ui; do
-    if [ -d "\$pkg" ]; then
-        echo "Building \$pkg..."
-        cd "\$pkg"
-        
-        # Install dependencies for this workspace package
-        echo "Installing dependencies for \$pkg..."
-        pnpm install
-        
-        # Check if build script exists
-        if grep -q '"build"' package.json 2>/dev/null; then
-            echo "Running build for \$pkg..."
-            # Set PATH to include root node_modules for TypeScript
-            export PATH="\$PWD/../../node_modules/.bin:\$PATH"
-            if pnpm run build 2>&1; then
-                echo "✅ \$pkg built successfully"
-            else
-                echo "❌ Failed to build \$pkg - this may cause app builds to fail"
-            fi
-        else
-            echo "⚠️  No build script found in \$pkg - skipping"
-        fi
-        cd - > /dev/null
-    fi
-done
-
-# Now try building the main applications
-echo "Building main applications..."
-
-# Method 1: Try turbo (handles dependencies automatically)
+# Build strategy: Try multiple approaches
 build_success=false
 
-if [ -f "node_modules/.bin/turbo" ]; then
-    echo "Attempting build with local turbo..."
-    if ./node_modules/.bin/turbo build 2>&1 | tee build.log; then
-        echo "✅ Build successful with local turbo"
-        build_success=true
-    else
-        echo "❌ Local turbo build failed. Error output:"
-        tail -20 build.log
-    fi
-fi
-
-# Method 2: Try npx turbo if local failed
-if [ "\$build_success" = "false" ]; then
-    echo "Trying npx turbo..."
-    if npx turbo@1.10.12 build 2>&1 | tee build.log; then
-        echo "✅ Build successful with npx turbo"
-        build_success=true
-    else
-        echo "❌ npx turbo build failed. Error output:"
-        tail -20 build.log
-    fi
-fi
-
-# Method 3: Try pnpm run build if turbo failed
-if [ "\$build_success" = "false" ]; then
-    echo "Trying pnpm run build..."
-    if pnpm run build 2>&1 | tee build.log; then
-        echo "✅ Build successful with pnpm run build"
-        build_success=true
-    else
-        echo "❌ pnpm run build failed. Error output:"
-        tail -20 build.log
-    fi
-fi
-
-# Method 4: Manual workspace builds if all else failed
-if [ "\$build_success" = "false" ]; then
-    echo "All automated builds failed. Attempting manual workspace builds..."
-    
-    # Build API manually
-    echo "Building API manually..."
-    cd apps/api
-    if [ -f "package.json" ]; then
-        echo "Installing API dependencies..."
-        pnpm install
-        echo "Running API TypeScript build..."
-        if pnpm run build 2>&1 | tee ../../api-build.log; then
-            echo "✅ API built successfully"
-        else
-            echo "❌ API build failed. Error output:"
-            tail -10 ../../api-build.log
+# Method 1: Try turbo build (preferred)
+if ! $build_success; then
+    log "Attempting build with Turbo..."
+    if command -v turbo >/dev/null 2>&1; then
+        if turbo build 2>&1 | tee build.log; then
+            log "✅ Build successful with global turbo"
+            build_success=true
+        fi
+    elif [ -f "node_modules/.bin/turbo" ]; then
+        if ./node_modules/.bin/turbo build 2>&1 | tee build.log; then
+            log "✅ Build successful with local turbo"
+            build_success=true
         fi
     fi
-    cd ../..
-    
-    # Build Web manually
-    echo "Building Web manually..."
-    cd apps/web
-    if [ -f "package.json" ]; then
-        echo "Installing Web dependencies..."
-        pnpm install
-        echo "Running Web Next.js build..."
-        if pnpm run build 2>&1 | tee ../../web-build.log; then
-            echo "✅ Web built successfully"
-        else
-            echo "❌ Web build failed. Error output:"
-            tail -10 ../../web-build.log
-            echo ""
-            echo "Common Next.js build issues:"
-            echo "1. Missing workspace dependencies (@ux-nevesht/ui)"
-            echo "2. TypeScript errors in components"
-            echo "3. Import/export issues between packages"
-        fi
-    fi
-    cd ../..
 fi
 
-# Clean up log files
-rm -f build.log api-build.log web-build.log
+# Method 2: Try pnpm build
+if ! $build_success; then
+    log "Attempting build with pnpm..."
+    if pnpm build 2>&1 | tee build.log; then
+        log "✅ Build successful with pnpm"
+        build_success=true
+    fi
+fi
 
-echo "Build process completed."
+# Method 3: Build packages individually
+if ! $build_success; then
+    log "Building packages individually..."
+    
+    # Build shared packages first
+    for pkg in packages/config packages/database packages/ai packages/ui; do
+        if [ -d "$pkg" ] && [ -f "$pkg/package.json" ]; then
+            log "Building $pkg..."
+            cd "$pkg"
+            pnpm install
+            if grep -q '"build"' package.json; then
+                if pnpm run build; then
+                    log "✅ $pkg built successfully"
+                else
+                    warn "❌ Failed to build $pkg"
+                fi
+            fi
+            cd "$APP_DIR"
+        fi
+    done
+    
+    # Build API
+    log "Building API..."
+    if [ -d "apps/api" ]; then
+        cd apps/api
+        pnpm install
+        
+        # Try different build methods for API
+        if pnpm run build; then
+            log "✅ API built with pnpm"
+        elif command -v tsc >/dev/null 2>&1; then
+            log "Trying global TypeScript..."
+            tsc && log "✅ API built with global tsc"
+        elif [ -f "../../node_modules/.bin/tsc" ]; then
+            log "Trying root TypeScript..."
+            ../../node_modules/.bin/tsc && log "✅ API built with root tsc"
+        else
+            warn "❌ API build failed"
+        fi
+        cd "$APP_DIR"
+    fi
+    
+    # Build Web
+    log "Building Web..."
+    if [ -d "apps/web" ]; then
+        cd apps/web
+        pnpm install
+        
+        # Set Next.js environment
+        export NODE_ENV=production
+        export NEXT_TELEMETRY_DISABLED=1
+        
+        if pnpm run build; then
+            log "✅ Web built successfully"
+        else
+            warn "❌ Web build failed"
+        fi
+        cd "$APP_DIR"
+    fi
+fi
 
-# Verify build outputs exist
-echo "Verifying build outputs..."
+# Verify build outputs
+log "Verifying build outputs..."
+API_BUILT=false
+WEB_BUILT=false
+
 if [ -f "apps/api/dist/index.js" ]; then
-    echo "✅ API build output found: apps/api/dist/index.js"
+    log "✅ API build output found: apps/api/dist/index.js"
+    API_BUILT=true
 else
-    echo "❌ API build output missing: apps/api/dist/index.js"
-    echo "Contents of apps/api/dist/:"
-    ls -la apps/api/dist/ 2>/dev/null || echo "Directory does not exist"
+    warn "❌ API build output missing"
+    # List what we have
+    if [ -d "apps/api/dist" ]; then
+        log "Contents of apps/api/dist/:"
+        ls -la apps/api/dist/
+    fi
 fi
 
 if [ -d "apps/web/.next" ]; then
-    echo "✅ Web build output found: apps/web/.next/"
+    log "✅ Web build output found: apps/web/.next/"
+    WEB_BUILT=true
 else
-    echo "❌ Web build output missing: apps/web/.next/"
-    echo "Contents of apps/web/:"
-    ls -la apps/web/ 2>/dev/null || echo "Directory does not exist"
+    warn "❌ Web build output missing"
 fi
+
+# Clean up
+rm -f build.log
+
+log "Build process completed."
+log "API Built: $API_BUILT"
+log "Web Built: $WEB_BUILT"
 
 EOF
 }
@@ -360,6 +346,9 @@ LOG_DIR=/var/www/$APP_NAME/logs
 # Domain
 DOMAIN=$DOMAIN
 NEXT_PUBLIC_DOMAIN=$DOMAIN
+
+# Next.js
+NEXT_TELEMETRY_DISABLED=1
 EOF
 
     log "Environment file created. Please update the values in $APP_DIR/.env"
@@ -377,7 +366,7 @@ module.exports = {
       script: './apps/api/dist/index.js',
       cwd: '/var/www/ux-nevesht',
       instances: 1,
-      exec_mode: 'cluster',
+      exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
         PORT: 3001
@@ -387,11 +376,10 @@ module.exports = {
       log_file: './logs/api-combined.log',
       time: true,
       max_memory_restart: '1G',
-      node_args: '--max-old-space-size=1024',
-      watch: false,
       autorestart: true,
-      max_restarts: 10,
-      min_uptime: '10s'
+      max_restarts: 5,
+      min_uptime: '10s',
+      restart_delay: 4000
     },
     {
       name: 'ux-nevesht-web',
@@ -403,17 +391,17 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
-        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/var/www/ux-nevesht/node_modules/.bin:/var/www/ux-nevesht/apps/web/node_modules/.bin'
+        NEXT_TELEMETRY_DISABLED: 1
       },
       error_file: '../../logs/web-error.log',
       out_file: '../../logs/web-out.log',
       log_file: '../../logs/web-combined.log',
       time: true,
       max_memory_restart: '1G',
-      watch: false,
       autorestart: true,
-      max_restarts: 10,
-      min_uptime: '10s'
+      max_restarts: 5,
+      min_uptime: '10s',
+      restart_delay: 4000
     }
   ]
 };
@@ -424,48 +412,19 @@ EOF
 create_nginx_config() {
     log "Creating Nginx configuration..."
     
-    # Clean up any existing problematic configurations
+    # Clean up any existing configurations
     rm -f /etc/nginx/sites-enabled/ux-nevesht
     rm -f /etc/nginx/sites-available/ux-nevesht
-    
-    # Remove ALL existing rate limiting configurations to prevent duplicates
-    log "Cleaning up existing rate limiting configurations..."
-    
-    # Remove from conf.d directory
     rm -f /etc/nginx/conf.d/rate-limiting.conf
     rm -f /etc/nginx/conf.d/*rate*.conf
     
-    # Check and clean nginx.conf if it has rate limiting zones
-    if grep -q "limit_req_zone" /etc/nginx/nginx.conf; then
-        log "Removing rate limiting zones from main nginx.conf..."
-        # Restore from backup if available, otherwise remove the lines
-        if [ -f /etc/nginx/nginx.conf.backup ]; then
-            cp /etc/nginx/nginx.conf.backup /etc/nginx/nginx.conf
-        else
-            # Remove rate limiting lines from nginx.conf
-            sed -i '/limit_req_zone/d' /etc/nginx/nginx.conf
-            sed -i '/# Rate limiting zones/d' /etc/nginx/nginx.conf
-        fi
+    # Restore nginx.conf from backup if it exists
+    if [ -f /etc/nginx/nginx.conf.backup ]; then
+        log "Restoring nginx.conf from backup..."
+        cp /etc/nginx/nginx.conf.backup /etc/nginx/nginx.conf
     fi
     
-    # Remove any gzip configurations that might have been added
-    if grep -q "# Gzip Settings" /etc/nginx/nginx.conf; then
-        log "Cleaning up gzip configurations from main nginx.conf..."
-        if [ -f /etc/nginx/nginx.conf.backup ]; then
-            cp /etc/nginx/nginx.conf.backup /etc/nginx/nginx.conf
-        fi
-    fi
-    
-    # Test nginx configuration before proceeding
-    log "Testing nginx configuration after cleanup..."
-    if ! nginx -t 2>/dev/null; then
-        log "Nginx configuration has issues, restoring from backup..."
-        if [ -f /etc/nginx/nginx.conf.backup ]; then
-            cp /etc/nginx/nginx.conf.backup /etc/nginx/nginx.conf
-        fi
-    fi
-    
-    # Create a custom nginx configuration file for rate limiting
+    # Create rate limiting configuration
     log "Creating rate limiting configuration..."
     tee /etc/nginx/conf.d/rate-limiting.conf > /dev/null << 'EOF'
 # Rate limiting zones for UX Nevesht
@@ -474,6 +433,7 @@ limit_req_zone $binary_remote_addr zone=web:10m rate=30r/s;
 limit_req_zone $binary_remote_addr zone=upload:10m rate=5r/s;
 EOF
     
+    # Create server configuration
     log "Creating server configuration..."
     tee /etc/nginx/sites-available/$APP_NAME > /dev/null << EOF
 server {
@@ -487,10 +447,8 @@ server {
     add_header Referrer-Policy "no-referrer-when-downgrade" always;
     add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval'" always;
     
-    # Client max body size for file uploads
+    # Client settings
     client_max_body_size 10M;
-    
-    # Proxy timeouts
     proxy_connect_timeout 60s;
     proxy_send_timeout 60s;
     proxy_read_timeout 60s;
@@ -508,11 +466,16 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
-        proxy_read_timeout 300s;
-        proxy_connect_timeout 75s;
     }
     
-    # Socket.IO routes (WebSocket support)
+    # Health check
+    location /health {
+        proxy_pass http://localhost:$API_PORT/health;
+        proxy_set_header Host \$host;
+        access_log off;
+    }
+    
+    # Socket.IO support
     location /socket.io/ {
         proxy_pass http://localhost:$API_PORT;
         proxy_http_version 1.1;
@@ -524,14 +487,7 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
     
-    # Health check
-    location /health {
-        proxy_pass http://localhost:$API_PORT/health;
-        proxy_set_header Host \$host;
-        access_log off;
-    }
-    
-    # Static assets with caching
+    # Static assets
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|webp|avif)\$ {
         proxy_pass http://localhost:$WEB_PORT;
         proxy_set_header Host \$host;
@@ -549,7 +505,7 @@ server {
         access_log off;
     }
     
-    # Main application routes
+    # Main application
     location / {
         limit_req zone=web burst=50 nodelay;
         
@@ -564,28 +520,25 @@ server {
         proxy_cache_bypass \$http_upgrade;
     }
     
-    # Security: Deny access to hidden files
+    # Security
     location ~ /\. {
         deny all;
         access_log off;
         log_not_found off;
     }
     
-    # Security: Deny access to sensitive files
     location ~* \.(env|log|conf)\$ {
         deny all;
         access_log off;
         log_not_found off;
     }
     
-    # Robots.txt
+    # SEO files
     location = /robots.txt {
         proxy_pass http://localhost:$WEB_PORT/robots.txt;
         access_log off;
-        log_not_found off;
     }
     
-    # Sitemap
     location = /sitemap.xml {
         proxy_pass http://localhost:$WEB_PORT/sitemap.xml;
         access_log off;
@@ -599,18 +552,16 @@ EOF
 
     # Enable the site
     ln -sf /etc/nginx/sites-available/$APP_NAME /etc/nginx/sites-enabled/
-    
-    # Remove default site if it exists
     rm -f /etc/nginx/sites-enabled/default
     
-    # Test Nginx configuration
+    # Test and reload Nginx
     log "Testing Nginx configuration..."
     if nginx -t; then
         log "Nginx configuration is valid. Reloading..."
         systemctl reload nginx
         log "Nginx configured successfully"
     else
-        error "Nginx configuration test failed. Please check the configuration manually."
+        error "Nginx configuration test failed"
     fi
 }
 
@@ -622,7 +573,6 @@ setup_logging() {
     sudo -u $APP_USER mkdir -p $APP_DIR/uploads
     mkdir -p /var/log/nginx
     
-    # Set proper permissions
     chown -R $APP_USER:www-data $APP_DIR/logs
     chown -R $APP_USER:www-data $APP_DIR/uploads
     chmod -R 755 $APP_DIR/logs
@@ -646,26 +596,20 @@ setup_firewall() {
 setup_pm2_for_user() {
     log "Setting up PM2 for application user..."
     
-    # Setup PM2 startup script properly
-    log "Configuring PM2 startup..."
-    
-    # Run the PM2 startup command directly
+    # Configure PM2 startup
     env PATH=$PATH:/usr/bin pm2 startup systemd -u $APP_USER --hp /home/$APP_USER
     
     log "PM2 startup configured successfully"
 }
 
-# Start services
+# Start services intelligently
 start_services() {
     log "Starting application services..."
     
-    # Switch to app user and start PM2
-    sudo -u $APP_USER bash << EOF
+    sudo -u $APP_USER bash << 'EOF'
 cd $APP_DIR
 
-# Verify build outputs before starting services
-echo "Checking build outputs before starting services..."
-
+# Check what we can start
 API_BUILT=false
 WEB_BUILT=false
 
@@ -673,126 +617,53 @@ if [ -f "apps/api/dist/index.js" ]; then
     echo "✅ API build found"
     API_BUILT=true
 else
-    echo "❌ API build missing - will not start API service"
+    echo "❌ API build missing"
 fi
 
-if [ -d "apps/web/.next" ] && [ -f "apps/web/package.json" ]; then
+if [ -d "apps/web/.next" ]; then
     echo "✅ Web build found"
     WEB_BUILT=true
 else
-    echo "❌ Web build missing - will not start Web service"
+    echo "❌ Web build missing"
 fi
 
-# Start services based on what was built successfully
-if [ "\$API_BUILT" = "true" ] && [ "\$WEB_BUILT" = "true" ]; then
+# Create appropriate PM2 config based on what's available
+if [ "$API_BUILT" = "true" ] && [ "$WEB_BUILT" = "true" ]; then
     echo "Starting both API and Web services..."
-    pm2 start ecosystem.config.js --env production
-elif [ "\$API_BUILT" = "true" ]; then
-    echo "Starting API service only (Web build failed)..."
-    # Create API-only config
-    cat > ecosystem.api-only.js << 'API_EOF'
-module.exports = {
-  apps: [
-    {
-      name: 'ux-nevesht-api',
-      script: './apps/api/dist/index.js',
-      cwd: '/var/www/ux-nevesht',
-      instances: 1,
-      exec_mode: 'cluster',
-      env: {
-        NODE_ENV: 'production',
-        PORT: 3001
-      },
-      error_file: './logs/api-error.log',
-      out_file: './logs/api-out.log',
-      log_file: './logs/api-combined.log',
-      time: true,
-      max_memory_restart: '1G',
-      node_args: '--max-old-space-size=1024',
-      watch: false,
-      autorestart: true,
-      max_restarts: 10,
-      min_uptime: '10s'
-    }
-  ]
-};
-API_EOF
-    pm2 start ecosystem.api-only.js --env production
-    rm -f ecosystem.api-only.js
-elif [ "\$WEB_BUILT" = "true" ]; then
-    echo "Starting Web service only (API build failed)..."
-    # Create Web-only config
-    cat > ecosystem.web-only.js << 'WEB_EOF'
-module.exports = {
-  apps: [
-    {
-      name: 'ux-nevesht-web',
-      script: './node_modules/.bin/next',
-      args: 'start',
-      cwd: '/var/www/ux-nevesht/apps/web',
-      instances: 1,
-      exec_mode: 'fork',
-      env: {
-        NODE_ENV: 'production',
-        PORT: 3000,
-        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/var/www/ux-nevesht/node_modules/.bin:/var/www/ux-nevesht/apps/web/node_modules/.bin'
-      },
-      error_file: '../../logs/web-error.log',
-      out_file: '../../logs/web-out.log',
-      log_file: '../../logs/web-combined.log',
-      time: true,
-      max_memory_restart: '1G',
-      watch: false,
-      autorestart: true,
-      max_restarts: 10,
-      min_uptime: '10s'
-    }
-  ]
-};
-WEB_EOF
-    pm2 start ecosystem.web-only.js --env production
-    rm -f ecosystem.web-only.js
+    pm2 start ecosystem.config.js
+elif [ "$API_BUILT" = "true" ]; then
+    echo "Starting API service only..."
+    pm2 start ecosystem.config.js --only ux-nevesht-api
+elif [ "$WEB_BUILT" = "true" ]; then
+    echo "Starting Web service only..."
+    pm2 start ecosystem.config.js --only ux-nevesht-web
 else
     echo "❌ No services can be started - no successful builds found"
-    echo "Please check the build process and try again"
-    echo ""
-    echo "To debug build issues, run:"
-    echo "cd /var/www/ux-nevesht"
-    echo "sudo -u uxnevesht ./debug-build.sh"
+    echo "Run: sudo -u uxnevesht ./debug-build.sh"
+    exit 1
 fi
 
-# Save the PM2 process list and show status
-if [ "\$API_BUILT" = "true" ] || [ "\$WEB_BUILT" = "true" ]; then
-    pm2 save
-    pm2 list
-fi
+pm2 save
+pm2 list
 
 EOF
     
     log "Services started successfully"
     
-    # Check if services are running
-    log "Checking service status..."
-    sudo -u $APP_USER pm2 list
-    
-    # Wait a moment for services to fully start
+    # Health checks
     sleep 10
-    
-    # Health check
     log "Performing health checks..."
     
-    # Check if API is responding
     if curl -f -s http://localhost:$API_PORT/health > /dev/null 2>&1; then
-        log "✅ API health check: PASSED (http://localhost:$API_PORT/health)"
+        log "✅ API health check: PASSED"
     else
-        warn "⚠️  API health check: FAILED - API may still be starting up"
+        warn "⚠️  API health check: FAILED"
     fi
     
-    # Check if Web is responding
     if curl -f -s http://localhost:$WEB_PORT > /dev/null 2>&1; then
-        log "✅ Web health check: PASSED (http://localhost:$WEB_PORT)"
+        log "✅ Web health check: PASSED"
     else
-        warn "⚠️  Web health check: FAILED - Web app may still be starting up"
+        warn "⚠️  Web health check: FAILED"
     fi
 }
 
@@ -800,59 +671,36 @@ EOF
 create_update_script() {
     log "Creating update script..."
     
-    tee /usr/local/bin/update-$APP_NAME > /dev/null << EOF
+    tee /usr/local/bin/update-$APP_NAME > /dev/null << 'EOF'
 #!/bin/bash
-# Update script for $APP_NAME
+# Update script for ux-nevesht
 
 set -e
 
-APP_DIR="$APP_DIR"
-APP_USER="$APP_USER"
+APP_DIR="/var/www/ux-nevesht"
+APP_USER="uxnevesht"
 
-echo "Updating $APP_NAME..."
+echo "Updating ux-nevesht..."
 
-# Switch to app user
-sudo -u \$APP_USER bash << 'SCRIPT_EOF'
-cd \$APP_DIR
+sudo -u $APP_USER bash << 'SCRIPT_EOF'
+cd $APP_DIR
 
-# Set up proper PATH for npm/pnpm global packages and local node_modules
-export PATH="/usr/bin:\$PATH:\$PWD/node_modules/.bin"
+export PATH="/usr/local/bin:/usr/bin:$PATH:$PWD/node_modules/.bin"
 
 # Pull latest changes
 git fetch origin
 git reset --hard origin/main
 
 # Install dependencies
-echo "Installing dependencies..."
 pnpm install
 
-# Build the application
-echo "Building application..."
-if [ -f "node_modules/.bin/turbo" ]; then
-    echo "Using local turbo..."
-    if ./node_modules/.bin/turbo build; then
-        echo "✅ Build successful with local turbo"
-    else
-        echo "Local turbo failed, trying alternatives..."
-        if npx turbo@1.10.12 build; then
-            echo "✅ Build successful with npx turbo"
-        elif pnpm run build; then
-            echo "✅ Build successful with pnpm run build"
-        else
-            echo "Building workspaces individually..."
-            cd apps/api && pnpm install && pnpm run build && cd ../..
-            cd apps/web && pnpm install && pnpm run build && cd ../..
-        fi
-    fi
+# Build application
+if command -v turbo >/dev/null 2>&1; then
+    turbo build
+elif [ -f "node_modules/.bin/turbo" ]; then
+    ./node_modules/.bin/turbo build
 else
-    echo "No local turbo found, using alternatives..."
-    if pnpm run build; then
-        echo "✅ Build successful with pnpm run build"
-    else
-        echo "Building workspaces individually..."
-        cd apps/api && pnpm install && pnpm run build && cd ../..
-        cd apps/web && pnpm install && pnpm run build && cd ../..
-    fi
+    pnpm build
 fi
 
 # Restart services
@@ -867,7 +715,7 @@ EOF
     log "Update script created at /usr/local/bin/update-$APP_NAME"
 }
 
-# Setup SSL with Let's Encrypt (optional)
+# Setup SSL with Let's Encrypt
 setup_ssl() {
     read -p "Do you want to setup SSL with Let's Encrypt? (y/n): " -n 1 -r
     echo
@@ -878,9 +726,7 @@ setup_ssl() {
         log "Obtaining SSL certificate..."
         certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN
         
-        # Auto-renewal
         systemctl enable certbot.timer
-        
         log "SSL certificate installed successfully"
     fi
 }
@@ -893,7 +739,6 @@ main() {
     update_system
     install_nodejs
     install_nginx
-    install_pm2
     create_app_user
     setup_app_directory
     setup_application
@@ -915,7 +760,7 @@ main() {
     log "   - Add your Supabase credentials"
     log "   - Add your OpenAI API key"
     log "   - Configure other service keys"
-    log "2. Restart services after updating .env: sudo -u $APP_USER pm2 restart all"
+    log "2. Restart services: sudo -u $APP_USER pm2 restart all"
     log "3. Test your application at http://$DOMAIN"
     log ""
     log "🌐 Application URLs:"
@@ -924,23 +769,23 @@ main() {
     log "- Health check: http://$DOMAIN/health"
     log ""
     log "🔧 Management commands:"
-    log "- Update application: /usr/local/bin/update-$APP_NAME"
-    log "- Check PM2 status: sudo -u $APP_USER pm2 status"
-    log "- View logs: sudo -u $APP_USER pm2 logs"
-    log "- Restart services: sudo -u $APP_USER pm2 restart all"
-    log "- Check Nginx status: systemctl status nginx"
-    log "- View Nginx logs: tail -f /var/log/nginx/$APP_NAME-*.log"
+    log "- Update: /usr/local/bin/update-$APP_NAME"
+    log "- Status: sudo -u $APP_USER pm2 status"
+    log "- Logs: sudo -u $APP_USER pm2 logs"
+    log "- Restart: sudo -u $APP_USER pm2 restart all"
     log ""
     log "🔒 Security:"
-    log "- Firewall is configured and active"
+    log "- Firewall configured and active"
     log "- Services run under dedicated user: $APP_USER"
-    log "- Consider setting up SSL: certbot --nginx -d $DOMAIN"
+    log "- SSL available: certbot --nginx -d $DOMAIN"
     log ""
     log "📝 Important files:"
     log "- Application: $APP_DIR"
     log "- Environment: $APP_DIR/.env"
     log "- Nginx config: /etc/nginx/sites-available/$APP_NAME"
     log "- PM2 config: $APP_DIR/ecosystem.config.js"
+    log ""
+    log "If you encounter build issues, run: sudo -u $APP_USER ./debug-build.sh"
 }
 
 # Run main function
