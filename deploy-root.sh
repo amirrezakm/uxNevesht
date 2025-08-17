@@ -192,7 +192,7 @@ for pkg in packages/config packages/database packages/ai packages/ui; do
         pnpm install
         
         # Check if build script exists
-        if pnpm run build --dry-run 2>/dev/null; then
+        if grep -q '"build"' package.json 2>/dev/null; then
             echo "Running build for \$pkg..."
             # Set PATH to include root node_modules for TypeScript
             export PATH="\$PWD/../../node_modules/.bin:\$PATH"
@@ -395,14 +395,15 @@ module.exports = {
     },
     {
       name: 'ux-nevesht-web',
-      script: 'npm',
+      script: './node_modules/.bin/next',
       args: 'start',
       cwd: '/var/www/ux-nevesht/apps/web',
       instances: 1,
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000
+        PORT: 3000,
+        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/var/www/ux-nevesht/node_modules/.bin:/var/www/ux-nevesht/apps/web/node_modules/.bin'
       },
       error_file: '../../logs/web-error.log',
       out_file: '../../logs/web-out.log',
@@ -726,14 +727,15 @@ module.exports = {
   apps: [
     {
       name: 'ux-nevesht-web',
-      script: 'npm',
+      script: './node_modules/.bin/next',
       args: 'start',
       cwd: '/var/www/ux-nevesht/apps/web',
       instances: 1,
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000
+        PORT: 3000,
+        PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/var/www/ux-nevesht/node_modules/.bin:/var/www/ux-nevesht/apps/web/node_modules/.bin'
       },
       error_file: '../../logs/web-error.log',
       out_file: '../../logs/web-out.log',
