@@ -242,6 +242,24 @@ fi
 
 echo "Build process completed."
 
+# Verify build outputs exist
+echo "Verifying build outputs..."
+if [ -f "apps/api/dist/index.js" ]; then
+    echo "✅ API build output found: apps/api/dist/index.js"
+else
+    echo "❌ API build output missing: apps/api/dist/index.js"
+    echo "Contents of apps/api/dist/:"
+    ls -la apps/api/dist/ 2>/dev/null || echo "Directory does not exist"
+fi
+
+if [ -d "apps/web/.next" ]; then
+    echo "✅ Web build output found: apps/web/.next/"
+else
+    echo "❌ Web build output missing: apps/web/.next/"
+    echo "Contents of apps/web/:"
+    ls -la apps/web/ 2>/dev/null || echo "Directory does not exist"
+fi
+
 EOF
 }
 
@@ -315,15 +333,19 @@ module.exports = {
       log_file: './logs/api-combined.log',
       time: true,
       max_memory_restart: '1G',
-      node_args: '--max-old-space-size=1024'
+      node_args: '--max-old-space-size=1024',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s'
     },
     {
       name: 'ux-nevesht-web',
-      script: 'node_modules/next/dist/bin/next',
+      script: 'npm',
       args: 'start',
       cwd: '/var/www/ux-nevesht/apps/web',
       instances: 1,
-      exec_mode: 'cluster',
+      exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
         PORT: 3000
@@ -332,7 +354,11 @@ module.exports = {
       out_file: '../../logs/web-out.log',
       log_file: '../../logs/web-combined.log',
       time: true,
-      max_memory_restart: '1G'
+      max_memory_restart: '1G',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s'
     }
   ]
 };
@@ -582,14 +608,109 @@ start_services() {
     sudo -u $APP_USER bash << EOF
 cd $APP_DIR
 
-# Start the applications with PM2
-pm2 start ecosystem.config.js --env production
+# Verify build outputs before starting services
+echo "Checking build outputs before starting services..."
 
-# Save the PM2 process list
-pm2 save
+API_BUILT=false
+WEB_BUILT=false
 
-# Show PM2 status
-pm2 list
+if [ -f "apps/api/dist/index.js" ]; then
+    echo "✅ API build found"
+    API_BUILT=true
+else
+    echo "❌ API build missing - will not start API service"
+fi
+
+if [ -d "apps/web/.next" ] && [ -f "apps/web/package.json" ]; then
+    echo "✅ Web build found"
+    WEB_BUILT=true
+else
+    echo "❌ Web build missing - will not start Web service"
+fi
+
+# Create a temporary ecosystem config with only working services
+cat > ecosystem.temp.js << 'TEMP_EOF'
+module.exports = {
+  apps: [
+TEMP_EOF
+
+if [ "\$API_BUILT" = "true" ]; then
+    cat >> ecosystem.temp.js << 'TEMP_EOF'
+    {
+      name: 'ux-nevesht-api',
+      script: './apps/api/dist/index.js',
+      cwd: '/var/www/ux-nevesht',
+      instances: 1,
+      exec_mode: 'cluster',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3001
+      },
+      error_file: './logs/api-error.log',
+      out_file: './logs/api-out.log',
+      log_file: './logs/api-combined.log',
+      time: true,
+      max_memory_restart: '1G',
+      node_args: '--max-old-space-size=1024',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s'
+    },
+TEMP_EOF
+fi
+
+if [ "\$WEB_BUILT" = "true" ]; then
+    cat >> ecosystem.temp.js << 'TEMP_EOF'
+    {
+      name: 'ux-nevesht-web',
+      script: 'npm',
+      args: 'start',
+      cwd: '/var/www/ux-nevesht/apps/web',
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3000
+      },
+      error_file: '../../logs/web-error.log',
+      out_file: '../../logs/web-out.log',
+      log_file: '../../logs/web-combined.log',
+      time: true,
+      max_memory_restart: '1G',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s'
+    },
+TEMP_EOF
+fi
+
+# Close the config file (remove trailing comma if present)
+sed -i 's/,\$//' ecosystem.temp.js
+cat >> ecosystem.temp.js << 'TEMP_EOF'
+  ]
+};
+TEMP_EOF
+
+# Start the applications with PM2 using the temporary config
+if [ "\$API_BUILT" = "true" ] || [ "\$WEB_BUILT" = "true" ]; then
+    echo "Starting available services..."
+    pm2 start ecosystem.temp.js --env production
+    
+    # Save the PM2 process list
+    pm2 save
+    
+    # Show PM2 status
+    pm2 list
+else
+    echo "❌ No services can be started - no successful builds found"
+    echo "Please check the build process and try again"
+fi
+
+# Clean up temporary file
+rm -f ecosystem.temp.js
+
 EOF
     
     log "Services started successfully"
